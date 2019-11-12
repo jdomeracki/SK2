@@ -50,7 +50,7 @@ struct DOCUMENT TAB[] = {
 int FileCheck(char *file_name)
 {
 int tab_size = 3;
-    if (strcmp(file_name, "/") == 0)
+    if (strncmp(file_name, "/\0", 2) == 0)
     {
     return 2;
     }
@@ -135,17 +135,17 @@ void *Thread(void *ptr_cli_fd)
     fseek(f, 0, SEEK_END);
     long fsize = ftell(f);
     fseek(f, 0, SEEK_SET); 
-    char *string = malloc(fsize + 2);
-    fread(string, 1, fsize, f);
+    char *string2 = malloc(fsize + 2);
+    fread(string2, 1, fsize, f);
     fclose(f);
     puts("OK");
-    char *response = malloc(strlen(OK) + strlen(string + 2));
+    char *response2 = malloc(strlen(OK) + strlen(string2 + 2));
     
-    strcpy(response, OK);
-    strcat(response, string);
-    strcat(response, "\r\n");
+    strcpy(response2, OK);
+    strcat(response2, string2);
+    strcat(response2, "\r\n");
     
-    write(cli_fd, response, strlen(response));
+    write(cli_fd, response2, strlen(response2));
     close(cli_fd);
     }
     return 0;
