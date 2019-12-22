@@ -10,7 +10,7 @@
 #include <pthread.h>
 
 #define MAX_SIZE 8192
-#define PORT 8080
+#define PORT 12345
 #define QUEUE_SIZE 1000
 
 //Plik
@@ -46,6 +46,17 @@ struct DOCUMENT TAB[] = {
 {"/song", strlen("/song")}
 };
 
+
+//Sprawdzenie czy metoda jest wspierana
+int MethodCheck(char *method)
+{
+if (strncmp(method, "GET", 3) == 0)
+return 1;
+else 
+return 0;
+}
+
+
 //Sprawdzenie czy plik istnieje
 int FileCheck(char *file_name)
 {
@@ -64,6 +75,31 @@ int tab_size = 3;
 return 0;
 }
 
+
+//Sprawdzenie czy wersja HTTP jest obsługiwana
+int VersionCheck(char *version)
+{
+if (strncmp(version, "HTTP/1.1", 8) == 0 )
+  return 1;
+else 
+  return 0;
+}
+
+//Sprawdzenie czy udało się wpisać do socketu
+void WriteCheck(int cli_fd, char *resposne)
+{
+int num_of_bytes_written = 0; 
+do
+    {
+    num_of_bytes_written += write(cli_fd, resposne, strlen(resposne));
+    if(num_of_bytes_written <= 0) 
+    {
+      perror("Couldn't write to the socket!");
+      exit(1);}
+    } while (num_of_bytes_written != strlen(resposne));
+}
+
+
 //Zachowanie wątku
 void *Thread(void *ptr_cli_fd)
 {
@@ -73,83 +109,96 @@ void *Thread(void *ptr_cli_fd)
     char request[MAX_SIZE] = {0};
     char request_cp[MAX_SIZE] = {0};
     char *ptr, *method, *uri, *version;
+    FILE *f, *f2;
     read(cli_fd, request, MAX_SIZE);
-    int file_check_status;
+    int file_check_status, method_check_status, version_check_status;
     strcpy(request_cp, request);
     ptr = request_cp;
-    
-    //tokenizacja requestu 
     method = strtok_r(ptr, " \r\n", &ptr);
     uri = strtok_r(ptr, " \r\n", &ptr);
     version = strtok_r(ptr, " \r\n", &ptr);
+    method_check_status = MethodCheck(method);
     file_check_status = FileCheck(uri);
-    
-    
-    //podstawowa walidacja   
-  if (strncmp(method, "GET", 3) != 0 )
+    version_check_status = VersionCheck(version);
+
+    //Podstawowa walidacja
+    switch (method_check_status)
     {
+    case 0:
     puts("METHOD_NOT_ALLOWED");
-    write(cli_fd, METHOD_NOT_ALLOWED, strlen(METHOD_NOT_ALLOWED));
+    WriteCheck(cli_fd, METHOD_NOT_ALLOWED);
     close(cli_fd);
     return 0;
-    }
-    else if (file_check_status == 0)
-    {
-    puts("FILE NOT FOUND");
-    write(cli_fd, FILE_NOT_FOUND, strlen(FILE_NOT_FOUND));
-    close(cli_fd);
-    return 0;
-   }
-  else if (strncmp(version, "HTTP/1.1", 8) != 0 )
-    {
-    puts("HTTP VERSION NOT SUPPORTED");
-    write(cli_fd, BAD_REQUEST, strlen(BAD_REQUEST));
-    close(cli_fd);
-    return 0;
-   }
-  else
-    {  
-    if(file_check_status == 2)
-    {
-    FILE *f = fopen("index", "r");
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET); 
-    char *string = malloc(fsize + 2);
-    fread(string, 1, fsize, f);
-    fclose(f);
-    puts("OK");
-    char *response = malloc(strlen(OK) + strlen(string + 2));
-   
-    strcpy(response, OK);
-    strcat(response, string);
-    strcat(response, "\r\n");
-     
-    write(cli_fd, response, strlen(response));
-    close(cli_fd);
-    }
-    else if(file_check_status == 1)
-    {
-    char *file_path = uri+1;
-    FILE *f = fopen(file_path, "r");
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET); 
-    char *string2 = malloc(fsize + 2);
-    fread(string2, 1, fsize, f);
-    fclose(f);
-    puts("OK");
-    char *response2 = malloc(strlen(OK) + strlen(string2 + 2));
+      break;
+
+    case 1:
+          switch (version_check_status)
+          {
+          case 0:
+            puts("BAD_REQUEST");
+            WriteCheck(cli_fd, BAD_REQUEST);
+            close(cli_fd);
+            return 0;
+          break;
+
+          case 1:
+                switch (file_check_status)
+                {
+                case 0:
+                  puts("FILE NOT FOUND");
+                  WriteCheck(cli_fd, FILE_NOT_FOUND);
+                  close(cli_fd);
+                  return 0;
+                break;
+                
+                case 1:
+                  f = fopen(uri+1, "r");
+                  fseek(f, 0, SEEK_END);
+                  long fsize = ftell(f);
+                  fseek(f, 0, SEEK_SET); 
+                  char *string = malloc(fsize + 2);
+                  fread(string, 1, fsize, f);
+                  fclose(f);
+                  puts("OK");
+                  char *response = malloc(strlen(OK) + strlen(string + 2));
+                  strcpy(response, OK);
+                  strcat(response, string);
+                  strcat(response, "\r\n");
+                  WriteCheck(cli_fd, response);
+                  close(cli_fd);
+                  return 0;
+                 break; 
+
+                case 2:
+                  f2 = fopen("index", "r");
+                  fseek(f2, 0, SEEK_END);
+                  long fsize2 = ftell(f2);
+                  fseek(f2, 0, SEEK_SET); 
+                  char *string2 = malloc(fsize2 + 2);
+                  fread(string2, 1, fsize2, f2);
+                  fclose(f2);
+                  puts("OK");
+                  char *response2 = malloc(strlen(OK) + strlen(string2 + 2));
+                  strcpy(response2, OK);
+                  strcat(response2, string2);
+                  strcat(response2, "\r\n");
+                  WriteCheck(cli_fd, response2);
+                  close(cli_fd);
+                  return 0;
+                break;
+                
+                default:
+                  break;
+          }
+          
+          default:
+            break;
+          }
     
-    strcpy(response2, OK);
-    strcat(response2, string2);
-    strcat(response2, "\r\n");
-    
-    write(cli_fd, response2, strlen(response2));
-    close(cli_fd);
+    default:
+      break;
     }
     return 0;
-    }
 }
 
 
@@ -158,6 +207,7 @@ int main(int argc, char const *argv[])
   struct sockaddr_in srv_adr;
   int srv_fd, cli_fd;
   int sin_len = sizeof(srv_adr);
+  int reu_adr_val = 1;
      
   if ((srv_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
     {
@@ -169,6 +219,7 @@ int main(int argc, char const *argv[])
   srv_adr.sin_addr.s_addr = INADDR_ANY;
   srv_adr.sin_port = htons(PORT);
   memset(srv_adr.sin_zero, '\0', sizeof(srv_adr.sin_zero));
+  setsockopt(srv_fd , SOL_SOCKET, SO_REUSEADDR, (char*)&reu_adr_val, sizeof(reu_adr_val));
  
  
   if (bind(srv_fd, (struct sockaddr *)&srv_adr, sin_len) < 0)
