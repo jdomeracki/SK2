@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <errno.h>
 #include <sys/types.h> 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -13,7 +14,7 @@
 #define PORT 12345
 #define QUEUE_SIZE 1000
 
-//Plik
+//Struktura do obsługi pliku
 struct DOCUMENT
 {
 char *file_path;
@@ -22,22 +23,27 @@ int file_path_len;
 
 //Responsy
 char OK[] = "HTTP/1.1 200 OK\r\n"
+"Server: SK2\r\n"
 "Content-Type: text/html; charset=UTF-8\r\n\r\n";
 
 char BAD_REQUEST[] = "HTTP/1.1 400 Bad Request\r\n"
+"Server: SK2\r\n"
 "Content-Type: text/html; charset=iso-8859-1\r\n\r\n"
 "<!DOCTYPE HTML PUBLIC><html><head><title>400 Bad Request</title></head>"
-"<body><h1>Bad Request</h1><p>Your browser sent a request that this server could not understand.</p><p>The request line contained invalid characters following the protocol string.</p></body></html>\r\n";
+"<body><h1>400 Bad Request</h1><p>Your browser sent a request that this server could not understand.</p>"
+"<p>The request line contained invalid characters following the protocol string.</p></body></html>\r\n";
 
 char FILE_NOT_FOUND[] = "HTTP/1.1 404 File Not Found\r\n"
+"Server: SK2\r\n"
 "Content-Type: text/html; charset=iso-8859-1\r\n\r\n"
 "<!DOCTYPE HTML PUBLIC><html><head><title>404 File Not Found</title></head>"
 "<body><h1>404 File Not Found</h1><p>File was not found.</p>\r\n";
 
 char METHOD_NOT_ALLOWED[] = "HTTP/1.1 405 Method Not Allowed\r\n"
+"Server: SK2\r\n"
 "Content-Type: text/html; charset=iso-8859-1\r\n\r\n"
 "<!DOCTYPE HTML PUBLIC><html><head><title>405 Method Not Allowed</title></head>"
-"<body><h1>Method Not Allowed</h1><p>Your browser sent a requst with a method that is not supported.</p></body></html>\r\n";
+"<body><h1>405 Method Not Allowed</h1><p>Your browser sent a requst with a method that is not supported.</p></body></html>\r\n";
 
 //Statyczna tablica plików
 struct DOCUMENT TAB[] = {
@@ -56,7 +62,6 @@ else
 return 0;
 }
 
-
 //Sprawdzenie czy plik istnieje
 int FileCheck(char *file_name)
 {
@@ -74,7 +79,6 @@ int tab_size = 3;
     }
 return 0;
 }
-
 
 //Sprawdzenie czy wersja HTTP jest obsługiwana
 int VersionCheck(char *version)
@@ -99,6 +103,34 @@ do
     } while (num_of_bytes_written != strlen(resposne));
 }
 
+//Sprawdzenie czy udało się odczytać z socketu
+void ReadCheck(int cli_fd, char *request)
+{
+if (read(cli_fd, request, MAX_SIZE) == -1)
+    {
+        perror(strerror(errno));
+        exit(1);
+    }
+}
+
+//Odczyt danych z pliku i utworzenie response
+char *ResponseCompose(char *uri)
+{
+  FILE *f = fopen(uri, "r");
+  fseek (f, 0, SEEK_END);
+  long fsize = ftell(f);
+  fseek(f, 0, SEEK_SET); 
+  char *string = malloc(fsize + 2);
+  fread(string, 1, fsize, f);
+  fclose(f);
+  char *response = malloc(strlen(OK) + strlen(string + 2));
+  strcpy(response, OK);
+  strcat(response, string);
+  strcat(response, "\r\n");
+  free(string);
+  return response;
+}
+
 
 //Zachowanie wątku
 void *Thread(void *ptr_cli_fd)
@@ -108,10 +140,9 @@ void *Thread(void *ptr_cli_fd)
     pthread_detach(pthread_self());
     char request[MAX_SIZE] = {0};
     char request_cp[MAX_SIZE] = {0};
-    char *ptr, *method, *uri, *version;
-    FILE *f, *f2;
-    read(cli_fd, request, MAX_SIZE);
+    char *ptr, *method, *uri, *version, *response, *response_defualt;
     int file_check_status, method_check_status, version_check_status;
+    ReadCheck(cli_fd, request);
     strcpy(request_cp, request);
     ptr = request_cp;
     method = strtok_r(ptr, " \r\n", &ptr);
@@ -125,66 +156,38 @@ void *Thread(void *ptr_cli_fd)
     switch (method_check_status)
     {
     case 0:
-    puts("METHOD_NOT_ALLOWED");
+    //puts("METHOD NOT ALLOWED");
     WriteCheck(cli_fd, METHOD_NOT_ALLOWED);
-    close(cli_fd);
-    return 0;
       break;
 
     case 1:
           switch (version_check_status)
           {
           case 0:
-            puts("BAD_REQUEST");
+            //puts("BAD REQUEST");
             WriteCheck(cli_fd, BAD_REQUEST);
-            close(cli_fd);
-            return 0;
           break;
 
           case 1:
                 switch (file_check_status)
                 {
                 case 0:
-                  puts("FILE NOT FOUND");
+                  //puts("FILE NOT FOUND");
                   WriteCheck(cli_fd, FILE_NOT_FOUND);
-                  close(cli_fd);
-                  return 0;
                 break;
                 
                 case 1:
-                  f = fopen(uri+1, "r");
-                  fseek(f, 0, SEEK_END);
-                  long fsize = ftell(f);
-                  fseek(f, 0, SEEK_SET); 
-                  char *string = malloc(fsize + 2);
-                  fread(string, 1, fsize, f);
-                  fclose(f);
-                  puts("OK");
-                  char *response = malloc(strlen(OK) + strlen(string + 2));
-                  strcpy(response, OK);
-                  strcat(response, string);
-                  strcat(response, "\r\n");
+                  //puts("OK");
+                  response = ResponseCompose(uri+1);
                   WriteCheck(cli_fd, response);
-                  close(cli_fd);
-                  return 0;
+                  free(response);
                  break; 
 
                 case 2:
-                  f2 = fopen("index", "r");
-                  fseek(f2, 0, SEEK_END);
-                  long fsize2 = ftell(f2);
-                  fseek(f2, 0, SEEK_SET); 
-                  char *string2 = malloc(fsize2 + 2);
-                  fread(string2, 1, fsize2, f2);
-                  fclose(f2);
-                  puts("OK");
-                  char *response2 = malloc(strlen(OK) + strlen(string2 + 2));
-                  strcpy(response2, OK);
-                  strcat(response2, string2);
-                  strcat(response2, "\r\n");
-                  WriteCheck(cli_fd, response2);
-                  close(cli_fd);
-                  return 0;
+                  //puts("OK");
+                  response_defualt = ResponseCompose("index");
+                  WriteCheck(cli_fd, response_defualt);
+                  free(response_defualt);
                 break;
                 
                 default:
@@ -198,6 +201,7 @@ void *Thread(void *ptr_cli_fd)
     default:
       break;
     }
+    close(cli_fd);
     return 0;
 }
 
@@ -233,21 +237,22 @@ int main(int argc, char const *argv[])
         perror("Can't listen!");
         exit(1);
     }
- 
+
+  puts ("Server SK2 is running...");
+  puts ("PORT# -> 12345");
+  puts ("Accepted HTTP methods -> GET");
+
   while (1)
   {
-  
   if ((cli_fd = accept(srv_fd, (struct sockaddr *)&srv_adr, (socklen_t*)&sin_len)) < 0)
     {
         perror("Couldn't accept the connection!");
         exit(1);
     }
-    
    pthread_t t;
    int *ptr_cli_fd = malloc(sizeof(int));
    *ptr_cli_fd = cli_fd;
-   pthread_create(&t, NULL, Thread, ptr_cli_fd);
-      
+   pthread_create(&t, NULL, Thread, ptr_cli_fd);    
   }
   
   return 0;
