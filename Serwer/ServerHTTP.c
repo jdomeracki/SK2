@@ -24,14 +24,13 @@ int file_path_len;
 //Responsy
 char OK[] = "HTTP/1.1 200 OK\r\n"
 "Server: SK2\r\n"
-"Content-Type: text/html; charset=UTF-8\r\n\r\n";
+"Content-Type: text/html; charset=UTF-8\r\n";
 
 char BAD_REQUEST[] = "HTTP/1.1 400 Bad Request\r\n"
 "Server: SK2\r\n"
 "Content-Type: text/html; charset=iso-8859-1\r\n\r\n"
 "<!DOCTYPE HTML PUBLIC><html><head><title>400 Bad Request</title></head>"
-"<body><h1>400 Bad Request</h1><p>Your browser sent a request that this server could not understand.</p>"
-"<p>The request line contained invalid characters following the protocol string.</p></body></html>\r\n";
+"<body><h1>400 Bad Request</h1><p>Your browser sent a request that this server could not understand.</p></body></html>\r\n";
 
 char FILE_NOT_FOUND[] = "HTTP/1.1 404 File Not Found\r\n"
 "Server: SK2\r\n"
@@ -83,34 +82,45 @@ return 0;
 //Sprawdzenie czy wersja HTTP jest obsługiwana
 int VersionCheck(char *version)
 {
-if (strncmp(version, "HTTP/1.1", 8) == 0 )
+if ((strncmp(version, "HTTP/1.1", 8) == 0) || (strncmp(version, "HTTP/1.0", 8) == 0))
   return 1;
 else 
   return 0;
 }
 
 //Sprawdzenie czy udało się wpisać do socketu
-void WriteCheck(int cli_fd, char *resposne)
+void WriteCheck(int cli_fd, char *response)
 {
 int num_of_bytes_written = 0; 
 do
     {
-    num_of_bytes_written += write(cli_fd, resposne, strlen(resposne));
+    num_of_bytes_written += write(cli_fd, response, strlen(response));
     if(num_of_bytes_written <= 0) 
     {
       perror("Couldn't write to the socket!");
       exit(1);}
-    } while (num_of_bytes_written != strlen(resposne));
+    } while (num_of_bytes_written != strlen(response));
 }
 
 //Sprawdzenie czy udało się odczytać z socketu
 void ReadCheck(int cli_fd, char *request)
 {
-if (read(cli_fd, request, MAX_SIZE) == -1)
+  if(read(cli_fd, request, MAX_SIZE) == -1)
     {
         perror(strerror(errno));
         exit(1);
     }
+}
+
+//Sprawdzanie poprawności tokenów / requestu
+int TokenCheck(char *ptr, int cli_fd)
+{
+  if(ptr == NULL)
+    {
+        WriteCheck(cli_fd, BAD_REQUEST);
+        return 0;
+    } 
+  return 1;  
 }
 
 //Odczyt danych z pliku i utworzenie response
@@ -120,13 +130,23 @@ char *ResponseCompose(char *uri)
   fseek (f, 0, SEEK_END);
   long fsize = ftell(f);
   fseek(f, 0, SEEK_SET); 
-  char *string = malloc(fsize + 2);
+  char *string = malloc(fsize);
   fread(string, 1, fsize, f);
   fclose(f);
-  char *response = malloc(strlen(OK) + strlen(string + 2));
+  int file_size = strlen(string);
+  char *content_length = malloc(30);
+  char *buffer = malloc(sizeof(file_size));
+  sprintf(buffer, "%d", file_size);
+  strcpy(content_length, "Content-Length: ");
+  strcat(content_length, buffer);
+  strcat(content_length, "\r\n\r\n");
+  char *response = malloc(strlen(OK) + strlen(content_length) + file_size);
   strcpy(response, OK);
+  strcat(response, content_length);
   strcat(response, string);
   strcat(response, "\r\n");
+  free(content_length);
+  free(buffer);
   free(string);
   return response;
 }
@@ -145,18 +165,26 @@ void *Thread(void *ptr_cli_fd)
     ReadCheck(cli_fd, request);
     strcpy(request_cp, request);
     ptr = request_cp;
+
+    // Podstawowa walidacja
     method = strtok_r(ptr, " \r\n", &ptr);
-    uri = strtok_r(ptr, " \r\n", &ptr);
-    version = strtok_r(ptr, " \r\n", &ptr);
+    if (TokenCheck(method, cli_fd) == 0)
+    {return 0;}
+    uri = strtok_r(NULL, " \r\n", &ptr);
+    if (TokenCheck(uri, cli_fd) == 0)
+    {return 0;}
+    version = strtok_r(NULL, " \r\n", &ptr);
+    if (TokenCheck(version, cli_fd) == 0)
+    {return 0;}
+
     method_check_status = MethodCheck(method);
     file_check_status = FileCheck(uri);
     version_check_status = VersionCheck(version);
 
-    //Podstawowa walidacja
+    //Rozszerzona walidacja
     switch (method_check_status)
     {
     case 0:
-    //puts("METHOD NOT ALLOWED");
     WriteCheck(cli_fd, METHOD_NOT_ALLOWED);
       break;
 
@@ -164,27 +192,23 @@ void *Thread(void *ptr_cli_fd)
           switch (version_check_status)
           {
           case 0:
-            //puts("BAD REQUEST");
             WriteCheck(cli_fd, BAD_REQUEST);
-          break;
+           break;
 
           case 1:
                 switch (file_check_status)
                 {
                 case 0:
-                  //puts("FILE NOT FOUND");
                   WriteCheck(cli_fd, FILE_NOT_FOUND);
                 break;
                 
                 case 1:
-                  //puts("OK");
                   response = ResponseCompose(uri+1);
                   WriteCheck(cli_fd, response);
                   free(response);
                  break; 
 
                 case 2:
-                  //puts("OK");
                   response_defualt = ResponseCompose("index");
                   WriteCheck(cli_fd, response_defualt);
                   free(response_defualt);
@@ -257,3 +281,4 @@ int main(int argc, char const *argv[])
   
   return 0;
 }
+
