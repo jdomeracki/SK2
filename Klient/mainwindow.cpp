@@ -6,7 +6,6 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
-    resize(QDesktopWidget().availableGeometry(this).size() * 0.7);
 }
 
 MainWindow::~MainWindow()
@@ -53,12 +52,10 @@ void MainWindow::readyRead()
     int status_code = response->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if(response->error() == QNetworkReply::NoError)
     {
-        if(status_code == 200)
-        {
         QString response_text = response->readAll();
         QByteArray bytes = response_text.toUtf8();
         QString response_size = QString::number(bytes.size());
-        ui->status->setText("File size is: " + response_size + " bytes");
+        ui->status->setText(" File size is: " + response_size + " bytes");
         if(ui->checkBox->isChecked())
         {
             ui->textBrowser->setText(response_text);
@@ -67,44 +64,55 @@ void MainWindow::readyRead()
         {
             ui->textBrowser->setText("");
         }
+        if(status_code == 200)
+        {
         QString file_name = ui->line_Edit_File->text();
         QString path = ui->line_Edit_Dir->text();
         QString save_as = ui->line_Edit_SaveAs->text();
         QString full_path = "";
         if(path.isEmpty())
         {
-            if(save_as.isEmpty())
+            if(save_as.isEmpty() && file_name.isEmpty())
             {
               full_path = "index.html";
             }
-            else
+            else if (file_name.isEmpty())
             {
               full_path = save_as;
+            }
+            else if (save_as.isEmpty())
+            {
+               full_path = file_name + ".html";
             }
         }
         else
         {
-            if(save_as.isEmpty())
+            if(save_as.isEmpty() && file_name.isEmpty())
             {
-                full_path = path + "index.html";
+              full_path = path + "index.html";
             }
-            else
+            else if (file_name.isEmpty())
             {
-                full_path = path + save_as;
+              full_path = path + save_as;
             }
-        }
-        {
-            QMessageBox::information(this,"Saved Succesfully",full_path + "was saved succesfully");
+            else if (save_as.isEmpty())
+            {
+               full_path = path + file_name + ".html";
+            }
         }
         QFile file(full_path);
         if(!file.open(QFile::WriteOnly | QFile::Text))
         {
-            QMessageBox::critical(this,"File Error","File could not be opened!");
+            QMessageBox::critical(this,"File Error","File could not be opened/created!");
         }
+        else
+        {
+            QMessageBox::information(this,"Saved Succesfully",full_path + " was saved succesfully");
         QTextStream out(&file);
         out << response_text;
         file.flush();
         file.close();
+        }
         }
         else if(status_code == 400)
         {
