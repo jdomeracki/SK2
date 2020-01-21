@@ -47,8 +47,7 @@ char METHOD_NOT_ALLOWED[] = "HTTP/1.1 405 Method Not Allowed\r\n"
 //Statyczna tablica plików
 struct DOCUMENT TAB[] = {
 {"/index", strlen("/index")},
-{"/photo", strlen("/photo")},
-{"/song", strlen("/song")}
+{"/sample", strlen("/sample")}                          }
 };
 
 
