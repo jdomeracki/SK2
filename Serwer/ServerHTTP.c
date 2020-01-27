@@ -63,7 +63,7 @@ return 0;
 //Sprawdzenie czy plik istnieje
 int FileCheck(char *file_name)
 {
-int tab_size = 3;
+int tab_size = 2;
     if (strncmp(file_name, "/\0", 2) == 0)
     {
     return 2;
