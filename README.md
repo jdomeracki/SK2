@@ -3,7 +3,7 @@ Aplikacja typu klient-serwer pozwalająca na pobieranie i zapis plików.
 
 ## Kompilacja 
 Serwer: 
-gcc -Wall SeverHTTP.c -o ServerHTTP.out -lpthread  
+gcc -Wall ServerHTTP.c -o ServerHTTP.out -lpthread  
 
 ## Użycie
 Serwer działa na porcie 12345.<br/>
