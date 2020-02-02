@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <math.h>
 #include <sys/types.h> 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -10,7 +11,7 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 
-#define MAX_SIZE 8192
+#define MAX_SIZE 16384
 #define PORT 12345
 #define QUEUE_SIZE 1000
 
@@ -44,12 +45,6 @@ char METHOD_NOT_ALLOWED[] = "HTTP/1.1 405 Method Not Allowed\r\n"
 "<!DOCTYPE HTML PUBLIC><html><head><title>405 Method Not Allowed</title></head>"
 "<body><h1>405 Method Not Allowed</h1><p>Your browser sent a requst with a method that is not supported.</p></body></html>\r\n";
 
-//Statyczna tablica plików
-struct DOCUMENT TAB[] = {
-{"/index", strlen("/index")},
-{"/sample", strlen("/sample")}                          
-};
-
 
 //Sprawdzenie czy metoda jest wspierana
 int MethodCheck(char *method)
@@ -61,9 +56,8 @@ return 0;
 }
 
 //Sprawdzenie czy plik istnieje
-int FileCheck(char *file_name)
+int FileCheck(char *file_name, struct DOCUMENT *TAB, int tab_size)
 {
-int tab_size = 2;
     if (strncmp(file_name, "/\0", 2) == 0)
     {
     return 2;
@@ -91,24 +85,45 @@ else
 void WriteCheck(int cli_fd, char *response)
 {
 int num_of_bytes_written = 0; 
+int tmp = 0;
+int retval = -1;
 do
     {
-    num_of_bytes_written += write(cli_fd, response, strlen(response));
-    if(num_of_bytes_written <= 0) 
+    tmp = write(cli_fd, response, strlen(response));
+    if(tmp <= 0) 
     {
       perror("Couldn't write to the socket!");
-      exit(1);}
-    } while (num_of_bytes_written != strlen(response));
+      pthread_exit(&retval);
+    }
+    num_of_bytes_written += tmp;
+    } while (num_of_bytes_written < strlen(response));
 }
 
 //Sprawdzenie czy udało się odczytać z socketu
 void ReadCheck(int cli_fd, char *request)
 {
-  if(read(cli_fd, request, MAX_SIZE) == -1)
+  int status = 1;
+  int content_length = 0;
+  int retval = -1;
+  do
+  {
+  status = read(cli_fd, request, MAX_SIZE);
+  if (status == -1)
     {
         perror(strerror(errno));
-        exit(1);
+        pthread_exit(&retval);
+    } 
+  if (status == 0)
+    {
+        perror("Socket closed!");
+        pthread_exit(&retval);   
     }
+  content_length = strlen(request);
+  }
+  while (!((request[content_length-4] == '\r') &&
+           (request[content_length-3] == '\n') &&   
+           (request[content_length-2] == '\r') &&
+           (request[content_length-1] == '\n')));
 }
 
 //Sprawdzanie poprawności tokenów / requestu
@@ -122,6 +137,18 @@ int TokenCheck(char *ptr, int cli_fd)
   return 1;  
 }
 
+//Oblicza ilość cyfr w liczbie
+int NumOfDigits(int file_size)
+{
+  int count = 0;
+  while (file_size != 0)
+  {
+    file_size /= 10;
+    ++count;
+  }
+  return count;
+}
+
 //Odczyt danych z pliku i utworzenie response
 char *ResponseCompose(char *uri)
 {
@@ -129,24 +156,27 @@ char *ResponseCompose(char *uri)
   fseek (f, 0, SEEK_END);
   long fsize = ftell(f);
   fseek(f, 0, SEEK_SET); 
-  char *string = malloc(fsize);
+  char *string = malloc(fsize * sizeof(char));
   fread(string, 1, fsize, f);
   fclose(f);
-  int file_size = strlen(string);
-  char *content_length = malloc(30);
-  char *buffer = malloc(sizeof(file_size));
-  sprintf(buffer, "%d", file_size);
+  int num_of_chars = NumOfDigits((int)fsize);
+  char *buffer = malloc(num_of_chars * sizeof(char));
+  sprintf(buffer, "%d", (int)fsize);
+  char *content_length = malloc((num_of_chars + 22) * sizeof(char));
   strcpy(content_length, "Content-Length: ");
   strcat(content_length, buffer);
   strcat(content_length, "\r\n\r\n");
-  char *response = malloc(strlen(OK) + strlen(content_length) + file_size);
+  int size = (strlen(OK) + strlen(content_length) + strlen(string));
+  char *response = malloc(size * sizeof(char));
   strcpy(response, OK);
   strcat(response, content_length);
   strcat(response, string);
-  strcat(response, "\r\n");
   free(content_length);
+  content_length = NULL;
   free(buffer);
+  buffer = NULL;
   free(string);
+  string = NULL;
   return response;
 }
 
@@ -157,6 +187,13 @@ void *Thread(void *ptr_cli_fd)
     int cli_fd = *(int*)ptr_cli_fd;
     free(ptr_cli_fd);
     pthread_detach(pthread_self());
+    struct DOCUMENT TAB[] = 
+    {
+      {"/index", strlen("/index")},
+      {"/sample", strlen("/sample")}
+    };
+    int retval = 0;
+    int num_of_files = sizeof(TAB)/16;
     char request[MAX_SIZE] = {0};
     char request_cp[MAX_SIZE] = {0};
     char *ptr, *method, *uri, *version, *response, *response_defualt;
@@ -177,7 +214,7 @@ void *Thread(void *ptr_cli_fd)
     {return 0;}
 
     method_check_status = MethodCheck(method);
-    file_check_status = FileCheck(uri);
+    file_check_status = FileCheck(uri, TAB, num_of_files);
     version_check_status = VersionCheck(version);
 
     //Rozszerzona walidacja
@@ -205,12 +242,14 @@ void *Thread(void *ptr_cli_fd)
                   response = ResponseCompose(uri+1);
                   WriteCheck(cli_fd, response);
                   free(response);
+                  response = NULL;
                  break; 
 
                 case 2:
                   response_defualt = ResponseCompose("index");
                   WriteCheck(cli_fd, response_defualt);
                   free(response_defualt);
+                  response_defualt = NULL;
                 break;
                 
                 default:
@@ -225,6 +264,7 @@ void *Thread(void *ptr_cli_fd)
       break;
     }
     close(cli_fd);
+    pthread_exit(&retval);
     return 0;
 }
 
@@ -277,7 +317,6 @@ int main(int argc, char const *argv[])
    *ptr_cli_fd = cli_fd;
    pthread_create(&t, NULL, Thread, ptr_cli_fd);    
   }
-  
   return 0;
 }
 
