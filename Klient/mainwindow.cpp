@@ -52,8 +52,11 @@ void MainWindow::readyRead()
     int status_code = response->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if(response->error() == QNetworkReply::NoError)
     {
-        QString response_text = response->readAll();
-        QByteArray bytes = response_text.toUtf8();
+        QByteArray bytes;
+        qDebug() << "Content-Length:" << response->header(QNetworkRequest::ContentLengthHeader);
+        bytes = response->readAll();
+        qDebug() << bytes.size();
+        QString response_text = QString(bytes);
         QString response_size = QString::number(bytes.size());
         ui->status->setText(" File size is: " + response_size + " bytes");
         if(ui->checkBox->isChecked())
